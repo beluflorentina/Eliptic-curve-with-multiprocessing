@@ -1,0 +1,156 @@
+import time
+import multiprocessing
+
+puncte = []
+coada= multiprocessing.Queue()
+terminate_flag = multiprocessing.Value('i', 0)  # flag comun pentru terminare procese
+
+def reduceModp(x, p):
+    return x % p
+
+
+def equalModp(x, y, p):
+    return reduceModp(x - y, p) == 0
+
+
+def inverseModp(x, p):
+    for y in range(p):
+        if equalModp(x * y, 1, p):
+            return y
+    return None
+
+
+def curba_valida(p, a, b):
+    # conditie nesingularitate
+    if (4 * a ** 3 + 27 * b ** 2) % p != 0:
+        print("Curba singulara! Eficienta algoritmului este scazuta")
+    else:
+        print("Curba nesingulara!")
+
+
+def puncte_pe_curba(start, end, p, a, b):
+    for x in range(start, end):
+        for y in range(p):
+            if equalModp(y * y, x * x * x + a * x + b, p):
+                puncte.append((x, y))
+    print(puncte)
+    print("Lista din proces are lungimea de: " + str(len(puncte)))
+
+
+def generare_procese(lista_args):
+    procese = []
+
+    for args in lista_args:
+        process = multiprocessing.Process(target=puncte_pe_curba, args=args)
+        procese.append(process)
+        process.start()
+
+    for process in procese:
+        process.join()
+
+
+def functie_weiersstras(x1, y1, x2, y2, a, mod):
+    if equalModp(x1, x2, mod) and equalModp(y1, -y2, mod):
+        print("Suma da un punct la infinit")
+        return 0, 0
+    if x1 == x2 and y2 != y1:
+        print("Suma da un punct la infinit")
+        return 0, 0
+    if equalModp(x1, x2, mod) and equalModp(y1, y2, mod):
+        u = reduceModp(3 * x1 + a, mod) * inverseModp(2 * y1, mod)
+    else:
+        u = reduceModp(y1 - y2, mod) * inverseModp(x1 - x2, mod)
+
+    v = reduceModp(y1 - u * x1, mod)
+    x3 = reduceModp(u * u - x1 - x2, mod)
+    y3 = reduceModp(-u * x3 - v, mod)
+    # print("x3 si y3 din functia weierstrass: ",x3, y3)
+    return x3, y3
+
+
+def adunare_punct_de_n_ori_CU_COADA(x1, y1, a, mod, nr_repetitii_pe_proces, coada):#FUNCTIA ESTE CREATA DOAR PENTRU FUNCTIA CU PROCESE, NU POATE FI SEPARATA DEOARECE MODIFICA COADA
+    # ne folosim de faptul ca punctele(in cazul nostru identice) pot fi adunate asociativ
+    # adunare unui punct cu el insusi rezulta in puncte diferite, de aici nevoia de functia weiersstras
+    #coada trebuie sa fie trecut ca parametru ca sa poata fi accesat de toate procesele,
+    #in coada se adauga rezultatele generate de procese, fiind o resursa comuna intre ele
+    rezultat_x = x1
+    rezultat_y = y1
+
+    for _ in range(nr_repetitii_pe_proces):
+        (m, n) = functie_weiersstras(rezultat_x, rezultat_y, x1, y1, a, mod)
+        rezultat_x=m
+        rezultat_y=n
+
+        if rezultat_x == 0 and rezultat_y == 0:
+            coada.put((0, 0))
+            terminate_flag.value = 1
+            #oprim executia proceselor atunci cand se ajunge la un punct la infinit (0, 0)
+            return
+        # print("rezultat x si y puse in coada in functia adunare_puncte_de_n_ori", rezultat_x, rezultat_y)
+    coada.put((rezultat_x, rezultat_y))
+    # print("coada poate sa aiba elemente in nr de: ", coada.qsize())
+
+    return rezultat_x, rezultat_y
+
+
+def adunare_puncte_proces(nr_procese,args):
+    #numarul total de puncte adunate va fi nr procese*nr repetitii
+    procese = []
+
+    #cream procese si adaugam rezultate intermediare in coada
+    for nr in range(nr_procese):
+        process = multiprocessing.Process(target=adunare_punct_de_n_ori_CU_COADA, args=args)
+        procese.append(process)
+        process.start()
+
+    for process in procese:
+        process.join()
+
+    # coada are atatea tupluri (x, y) cate procese cream,
+    # astfel se evita problema de atingere a numarului maxim de elemente din coada
+    rezultat_x, rezultat_y=coada.get()
+    # print("rezultat_x si y inainte de while not", rezultat_x, rezultat_y)
+    while not coada.empty():
+         x, y = coada.get()
+         print("x si y din while not ",x, y)
+
+         (x, y) = functie_weiersstras(rezultat_x, rezultat_y, x, y, args[2], args[3])
+         print("Functie weiersstras in adunare_puncte_proces")
+         if rezultat_x == 0 and rezultat_y == 0:
+              rezultat_x = 0
+              rezultat_y = 0
+
+              # print("x si  y final dupa adunarea rezultatelor din proces din WHILE sunt: ", rezultat_x, rezultat_y)
+         else:
+                rezultat_x = x
+                rezultat_y = y
+
+    # print("x si  y final dupa adunarea rezultatelor din proces sunt: ",rezultat_x, rezultat_y)
+    return rezultat_x, rezultat_y
+
+
+if __name__ == '__main__':
+    start = time.time()
+    # ec = generare_procese([(0, 93912//4, 93911, 2, 3), (93912//4, 93912//2, 93911, 2, 3),(93912//2, 3*93912//4, 93911, 2, 3),(3*93912//4, 93912, 93911, 2, 3)])
+    # Executia programului a durat: 575.8556792736053 pentru p=93911
+
+    # ec=generare_procese([(0,4,7,2,3),(4,8,7,2,3)])
+    # [(2, 1), (2, 6), (3, 1), (3, 6)]
+    # Lista din proces are lungimea de: 4
+    # Lista din proces are lungimea de: 1
+    # [(6, 0)]
+
+    # fct = functie_weiersstras(1, 1, 3, 4, 2, 5)
+    # print("Punctul rezultat prin aduncare este: " + str(fct))
+    # Punctul rezultat prin aduncare este: (2, 0)
+
+    # print("Adunarea cu procese: "+str(adunare_puncte_proces(2,[2,1,2,93911,100000000000,coada])))
+    # Executia programului a durat: 723.68470454216 #CAZ: 2 PROCESE->rezultatul:punct la infinit
+
+    # print("Adunarea cu procese: "+str(adunare_puncte_proces(4,[2,1,2,93911,100000000000,coada])))
+    #Executia programului a durat: 680.9274756908417 #CAZ: 4 PROCESE->rezultatul:punct la infinit
+
+    # print("Adunarea cu procese: " + str(adunare_puncte_proces(2, [2, 1, 2, 93911, 6, coada])))
+
+    #in cazul cu 4 procese se calculeaza 4*100000000000, dublu fata de cazul cu 2 procese, dar timpul de executie a iesit mai mic
+    print("Executia programului a durat:", time.time() - start)
